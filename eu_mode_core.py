@@ -57,7 +57,7 @@ from typing import Any, Callable, Mapping, Optional
 
 log = logging.getLogger("eu-mode")
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 USER_AGENT = "eu-mode-hermes/0.1"        # fixed, so the gateway can count EU Mode's calls
 MODEL = "haloguard-eu"
 DEFAULT_BASE_URL = "https://api.astroware.ai/v1"
@@ -96,7 +96,8 @@ class Settings:
     footer: bool = True
 
     @classmethod
-    def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":
+    def from_env(cls, env: Mapping[str, str]) -> "Settings":
+        """Read the settings from ``env``: under Hermes, its secret scope (see ``use_env``)."""
         try:
             timeout = float(env.get("EU_MODE_TIMEOUT", "") or DEFAULT_TIMEOUT)
         except ValueError:
@@ -267,6 +268,18 @@ class Session:
 
 _lock = threading.Lock()
 _store_lock = threading.Lock()
+# Where settings come from. The Hermes glue sets this to Hermes's secret scope, which honours the
+# active profile; EU Mode never reads the process environment itself. Empty: no key, so nothing is checked.
+_env: Mapping[str, str] = {}
+
+
+def use_env(source: Mapping[str, str]) -> None:
+    global _env
+    _env = source
+
+
+def current_settings() -> "Settings":
+    return Settings.from_env(_env)
 _sessions: "OrderedDict[str, Session]" = OrderedDict()
 status: dict = {}                            # the last check, for /eu-mode: no text, no key
 
@@ -361,7 +374,7 @@ def start_turn(session_id: str, user_message: str, history: Any, settings: Optio
     """Check the conversation that ends in the user's message. Called once per user turn.
     ``side_lines``: the host's own side requests that send text to the model around EU Mode
     (said once per session, in its first reply)."""
-    s = settings or Settings.from_env()
+    s = settings or current_settings()
     sess = _session(session_id)
     # Replies written last turn were written against last turn's placeholders: remember which, so
     # their originals can go back before this turn's check (one shared set across the conversation).
@@ -502,7 +515,7 @@ def finish_turn(session_id: str, response_text: str, settings: Optional[Settings
                 opener: Optional[Callable] = None) -> Optional[str]:
     """The reply the user sees: originals back in, the reply checked going out, EU Mode's lines added.
     Returns None when the reply is unchanged."""
-    s = settings or Settings.from_env()
+    s = settings or current_settings()
     with _lock:
         sess = _sessions.get(session_id)
     turn = sess.turn if sess else None

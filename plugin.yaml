@@ -1,11 +1,12 @@
 name: eu-mode
-version: 0.1.0
+version: 0.1.1
 description: >-
   EU Mode (beta): HaloGuard EU, Astroware's EU-hosted guard API, checks each
   message and each reply (allow or block). Personal data found in what users send
   is masked before it reaches the model, and put back in the reply you see.
 author: Astroware
 kind: standalone
+requires_hermes: ">=0.20.0"
 platforms:
   - linux
   - macos
@@ -17,8 +18,12 @@ requires_env:
 commands:
   # Metadata only: the host registers commands from register().
   - eu-mode
-hooks:
+# What register() registers; `hermes plugins validate` compares these with the real registrations.
+provides_tools: []
+provides_hooks:
   - pre_llm_call
   - transform_llm_output
   - on_session_finalize
   - on_session_reset
+provides_middleware:
+  - llm_request

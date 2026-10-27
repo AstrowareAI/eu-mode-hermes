@@ -35,7 +35,7 @@ The text of your conversation so far: your messages and the model's replies. It 
 
 Not sent: your system prompt, tool calls and tool results, files, images.
 
-EU Mode identifies itself with the User-Agent `eu-mode-hermes/0.1`. The key is read only from the `HALOGUARD_API_KEY` environment variable. EU Mode never logs or shows it, and sends it only over HTTPS (plain HTTP only to your own machine, for tests).
+EU Mode identifies itself with the User-Agent `eu-mode-hermes/0.1`. EU Mode reads the key, `HALOGUARD_API_KEY`, through Hermes: from your Hermes `.env` or your environment, for the profile in use. EU Mode never logs or shows it, and sends it only over HTTPS (plain HTTP only to your own machine, for tests).
 
 ## What EU Mode does not cover
 
@@ -47,7 +47,7 @@ Please read this before you rely on it.
   - automatic session titles send the first message of each session,
   - context compression sends earlier messages when a conversation gets long.
 
-  Both are on by default. Switch them off (commands below). While one is on, EU Mode says so in the first reply of each session.
+  Both are on by default. Switch them off (commands below). While one is on, EU Mode says so in the first reply of each session. EU Mode reads these two Hermes settings for that, and no other settings.
 - **Streaming must be off.** With streaming on, the reply appears on screen before EU Mode checks it and before the originals are put back. Streaming is off by default on chat platforms (`streaming.enabled`); in the terminal, switch it off (command below).
 - **Tool calls are not checked.** EU Mode checks messages and replies. It does not check or stop what the agent does with its tools.
 - **A blocked message still costs one short model request.** Hermes has no way for a plugin to cancel a turn. So your model gets one request with a fixed note in place of the whole conversation, and no tools. Its answer is thrown away.
@@ -66,7 +66,7 @@ HaloGuard EU has no uptime guarantee, so it can be unavailable at times. That is
 
 ## Install
 
-You need Hermes Agent (tested with 0.20.0) and a HaloGuard EU beta key from Astroware.
+You need Hermes Agent 0.20.0 or newer (tested with 0.20.0) and a HaloGuard EU beta key from Astroware.
 
 During the beta, use made-up data. Send no real personal data until your company has signed our DPA (Terms 10.3, astroware.ai/terms).
 

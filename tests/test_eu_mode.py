@@ -388,19 +388,33 @@ def load_plugin():
 
 
 class HermesGlue(Base):
+    def fake_secret_scope(self, get_secret):
+        """Install a stand-in for Hermes's agent.secret_scope; returns a function that removes it."""
+        mod = type(sys)("agent.secret_scope")
+        mod.get_secret = get_secret
+        saved = {k: sys.modules.get(k) for k in ("agent", "agent.secret_scope")}
+        sys.modules.update({"agent": type(sys)("agent"), "agent.secret_scope": mod})
+
+        def undo():
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
+        return undo
+
     def test_register_and_one_turn_through_hermes_shaped_calls(self):
         plugin = load_plugin()
         ctx = FakeCtx()
-        plugin.register(ctx)
-        self.assertEqual(sorted(ctx.hooks), ["on_session_finalize", "on_session_reset", "pre_llm_call", "transform_llm_output"])
-        self.assertIn("llm_request", ctx.middleware)
-        self.assertIn("eu-mode", ctx.commands)
-        self.assertNotIn("pre_tool_call", ctx.hooks)          # no tool-call gating in EU Mode
-
-        env = {"HALOGUARD_API_KEY": KEY, "HALOGUARD_BASE_URL": self.fake.base_url}
-        orig = plugin.core.Settings.from_env
-        plugin.core.Settings.from_env = classmethod(lambda cls, e=None: orig(env))
+        asked = []
+        values = {"HALOGUARD_API_KEY": KEY, "HALOGUARD_BASE_URL": self.fake.base_url}
+        undo = self.fake_secret_scope(lambda name, default=None: asked.append(name) or values.get(name, default))
         try:
+            plugin.register(ctx)
+            self.assertEqual(sorted(ctx.hooks), ["on_session_finalize", "on_session_reset", "pre_llm_call", "transform_llm_output"])
+            self.assertIn("llm_request", ctx.middleware)
+            self.assertIn("eu-mode", ctx.commands)
+            self.assertNotIn("pre_tool_call", ctx.hooks)          # no tool-call gating in EU Mode
             msg = "Write to Lena Vogt."
             history = [{"role": "user", "content": msg}]
             self.assertIsNone(ctx.hooks["pre_llm_call"][0](session_id="abc", user_message=msg,
@@ -413,8 +427,61 @@ class HermesGlue(Base):
             status = ctx.commands["eu-mode"]("")
             self.assertIn("key: set", status)
             self.assertNotIn(KEY, status)
+            self.assertIn("HALOGUARD_API_KEY", asked)            # the key came through Hermes's secret scope
         finally:
-            plugin.core.Settings.from_env = orig
+            undo()
+
+    def test_a_secret_scope_error_reads_as_no_key_and_fails_open(self):
+        plugin = load_plugin()
+        ctx = FakeCtx()
+
+        def unscoped(name, default=None):
+            raise RuntimeError("no secret scope while profiles are multiplexed (made-up)")
+        undo = self.fake_secret_scope(unscoped)
+        try:
+            plugin.register(ctx)
+            msg = "Hello there."
+            ctx.hooks["pre_llm_call"][0](session_id="x1", user_message=msg, conversation_history=[{"role": "user", "content": msg}])
+            out = ctx.hooks["transform_llm_output"][0](response_text="Hi.", session_id="x1")
+            self.assertIn("HALOGUARD_API_KEY is not set. Nothing was checked or masked.", out)
+            self.assertEqual(self.fake.calls, [])
+        finally:
+            undo()
+
+    def test_the_plugin_never_reads_the_process_environment(self):
+        for name in ("__init__.py", "eu_mode_core.py"):
+            text = (ROOT / name).read_text()
+            self.assertNotIn("os.environ", text, name)
+            self.assertNotIn("getenv", text, name)
+
+    def test_manifest_declares_exactly_what_register_registers(self):
+        lists, scalars, key = {}, {}, None
+        for raw in (ROOT / "plugin.yaml").read_text().splitlines():
+            if not raw.strip() or raw.lstrip().startswith("#"):
+                continue
+            if not raw.startswith(" ") and ":" in raw:
+                key, _, value = raw.partition(":")
+                value = value.strip()
+                if value == "[]":
+                    lists[key] = []
+                elif value and not value.startswith(">"):
+                    scalars[key] = value.strip('"')
+                else:
+                    lists[key] = []
+            elif raw.strip().startswith("- ") and key:
+                lists.setdefault(key, []).append(raw.strip()[2:].strip())
+        plugin = load_plugin()
+        ctx = FakeCtx()
+        undo = self.fake_secret_scope(lambda name, default=None: default)
+        try:
+            plugin.register(ctx)
+        finally:
+            undo()
+        self.assertEqual(sorted(lists["provides_hooks"]), sorted(ctx.hooks))
+        self.assertEqual(sorted(lists["provides_middleware"]), sorted(ctx.middleware))
+        self.assertEqual(lists["provides_tools"], [])
+        self.assertEqual(scalars["requires_hermes"], ">=0.20.0")
+        self.assertEqual(scalars["version"], plugin.core.VERSION)
 
     def test_side_requests_are_named_from_hermes_config(self):
         plugin = load_plugin()

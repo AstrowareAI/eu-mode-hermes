@@ -123,8 +123,24 @@ def _forget(session_id: str = "", **_: Any) -> None:
         pass
 
 
+class _HermesSecrets:
+    """EU Mode's settings, read through Hermes's secret scope (``agent.secret_scope.get_secret``),
+    which honours the active profile: a bare process-environment read could pick up another
+    profile's key when Hermes runs several at once. Anything that goes wrong reads as "not set",
+    so EU Mode fails open and says the key is not set."""
+
+    def get(self, name: str, default: Optional[str] = None) -> Optional[str]:
+        try:
+            from agent.secret_scope import get_secret
+
+            value = get_secret(name, default)
+        except Exception:  # noqa: BLE001 - an older Hermes, or no scope while profiles are multiplexed
+            return default
+        return value if isinstance(value, str) else default
+
+
 def _cmd_eu_mode(raw_args: str = "") -> str:
-    s = core.Settings.from_env()
+    s = core.current_settings()
     st = core.status
     lines = [
         f"EU Mode (beta) {core.VERSION}: HaloGuard EU ({core.MODEL}) at {s.base_url}",
@@ -153,6 +169,7 @@ def _store_path() -> Optional[Path]:
 
 
 def register(ctx) -> None:
+    core.use_env(_HermesSecrets())
     core.use_store(_store_path())
     ctx.register_hook("pre_llm_call", _pre_llm_call)
     ctx.register_hook("transform_llm_output", _transform_llm_output)
